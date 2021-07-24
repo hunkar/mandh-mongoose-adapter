@@ -1,0 +1,23 @@
+{
+  "name": "mandh-mongoose-adapter",
+  "version": "1.0.0",
+  "description": "This library prepared as mongoose helper for reusable CRUD functions.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mongoose",
+    "mandh",
+    "mongodb",
+    "crud",
+    "db"
+  ],
+  "author": "Mandh Solutions",
+  "license": "ISC",
+  "dependencies": {
+    "mandh-nodejs-utils": "^1.0.0",
+    "mongoose": "^5.13.3",
+    "regex-escape": "^3.4.10"
+  }
+}
