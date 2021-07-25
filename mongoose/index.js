@@ -54,26 +54,119 @@ const createConnection = async ({
 
 //This class is db model. Models will be created from this class
 const MandhDbModel = function (model, collectionName, db) {
-    const mongoose = require('mongoose');
+    this.mongoose = require('mongoose');
 
-    db = db || 'default';
-    const collectionSchema = new mongoose.Schema(model);
+    this.db = db || 'default';
+    const collectionSchema = new this.mongoose.Schema(model);
 
-    this.model = mongoose[db].model(collectionName, collectionSchema, collectionName);
+    this.model = this.mongoose[this.db].model(collectionName, collectionSchema, collectionName);
 
+
+    //Check is id exist on db.
+    this.isIdExist = async (id) => {
+        return this.model.exists({ id });
+    }
+
+    //Check exists with custom query.
+    this.isQueryExist = async (query) => {
+        return this.model.exists(query);
+    }
+
+    //Create new document.
+    this.create = async (data) => {
+        data.createdDate = new Date();
+
+        return this.model.create(data);
+    }
+
+    //Find document by id.
+    this.findById = async (id) => {
+        return this.model.findOne({ id }).exec();
+    }
+
+    //Find document by specific field.
+    this.findByField = async (field, value) => {
+        const filterData = {};
+        filterData[field] = value;
+
+        return this.model.findOne(filterData).exec();
+    }
+
+    //Find document with custom query.
+    this.findByQuery = async (query) => {
+        return this.model.findOne(query).exec();
+    }
+
+    //List documents with custom query.
+    this.list = async (query) => {
+        return this.model.find(query || {}).exec();
+    }
+
+    //Delete document by id.
+    this.deleteById = async (id) => {
+        return this.model.deleteOne({ id });
+    }
+
+    //Delete documents by custom query.
+    this.deleteByQuery = async (query) => {
+        return query && this.model.deleteMany(query);
+    }
+
+    //Update document by id.
+    this.updateById = async (id, data) => {
+        const updateData = {
+            updatedDate: new Date()
+        };
+
+        Object.keys(data).forEach((key) => {
+            if (data[key] !== undefined && key !== "id")
+                updateData[key] = data[key];
+        })
+
+        return this.model.updateOne({ id }, {
+            $set: updateData
+        })
+    }
+
+    //Update documents by custom query.
+    this.updateByQuery = async (query, data) => {
+        const updateData = {
+            updatedDate: new Date()
+        };
+
+        Object.keys(data).forEach((key) => {
+            if (data[key] !== undefined && key !== "id")
+                updateData[key] = data[key];
+        })
+
+        return query && Object.keys(query).length > 0 && this.model.updateMany(query, {
+            $set: updateData
+        })
+    }
+
+    //List query for pageable, searchable lists.
     this.findListable = async ({
         take = 10,
         skip = 0,
-        search,
-        sortBy,
-        sortType = "asc",
-        dateFilter,
+        search = {
+            fields: null,
+            value: null
+        },
+        sort = {
+            by: null,
+            type: "desc"
+        },
+        dateFilter = {
+            field: null,
+            start: null,
+            end: null
+        },
     }) => {
         const filterData = {};
         const sortData = {};
 
-        if (sortBy && sortType)
-            sortData[sortBy] = sortType === "asc" ? -1 : 1;
+        if (sort && sort.by && sort.type)
+            sortData[sort.by] = sort.type !== "desc" ? -1 : 1;
 
         if (search && search.fields && search.value) {
             search.fields = typeof search.fields === "string" ? [search.fields] : search.fields;
@@ -111,7 +204,13 @@ const MandhDbModel = function (model, collectionName, db) {
             .exec();
     }
 
+    //Returns mongoose model.
     this.getMongooseModel = () => { return this.model; }
+
+    //Add custom function to model.
+    this.registerCustomFunction = (fnName, fn) => {
+        this[fnName] = fn;
+    }
 }
 
 module.exports = {
