@@ -1,221 +1,216 @@
-const mongoose = require('mongoose');
-const ObjectId = require('mongodb').ObjectId;
+const mongoose = require("mongoose");
+const ObjectId = require("mongodb").ObjectId;
 const regexEscape = require("regex-escape");
-const stringUtil = require('mandh-nodejs-utils').stringUtil;
+const stringUtil = require("mandh-nodejs-utils").stringUtil;
 
-//Field types
-const fieldTypes = {
-    string: String,
-    number: Number,
-    object: Object,
-    date: Date,
-    boolean: Boolean,
-    array: Array
-}
+const connections = {};
 
 //This method returns mongodb id
 const getId = () => new ObjectId().toString();
 
+//Create mongoose model
+const createModel = (model, collectionName, db = "default") =>
+  connections[db] &&
+  connections[db].model(
+    collectionName,
+    new mongoose.Schema(model),
+    collectionName
+  );
+
 //This method creates connection of mongoose.
 //It have to run first
 const createConnection = async ({
-    connectionString,
-    dbName = 'default',
-    keepAlive = true,
-    useNewUrlParser = true,
-    useCreateIndex = true,
-    connectTimeoutMS = 10000,
-    socketTimeoutMS = 10000,
-    onConnection = () => { },
-    onError = () => { }
+  connectionString,
+  dbName = "default",
+  user,
+  pass,
+  keepAlive = true,
+  useNewUrlParser = true,
+  connectTimeoutMS = 10000,
+  socketTimeoutMS = 10000,
+  onConnection = () => {},
+  onError = () => {},
 }) => {
-    if (mongoose[dbName]) {
-        onConnection(mongoose[dbName]);
-        return mongoose[dbName];
-    }
+  if (connections[dbName]) {
+    return connections[dbName];
+  }
 
-    return new Promise((res, rej) => {
-        mongoose[dbName] = mongoose.createConnection(connectionString, {
-            keepAlive,
-            useNewUrlParser,
-            useCreateIndex,
-            connectTimeoutMS,
-            socketTimeoutMS,
-        });
+  connections[dbName] = mongoose.createConnection(connectionString, {
+    dbName,
+    connectTimeoutMS,
+    keepAlive,
+    pass,
+    socketTimeoutMS,
+    useNewUrlParser,
+    user,
+  });
 
-        mongoose[dbName].then(() => {
-            res(mongoose[dbName]);
-            onConnection(mongoose[dbName]);
-        }).catch((err) => {
-            onError(err);
-        })
-    })
-}
+  connections[dbName].on("error", (err) => {
+    onError(err);
+  });
+
+  connections[dbName].on("open", () => {
+    onConnection(connections[dbName]);
+  });
+
+  return connections[dbName];
+};
+
+//Clear all connections
+const clearConnections = () => {
+  connections = {};
+};
+
+//Get specific connection object
+const getConnection = (db) => connections[db];
+
+//Delete specific connection
+const deleteConnection = (db) => delete connections[db];
 
 //This class is db model. Models will be created from this class
-const MandhDbModel = function (model, collectionName, db) {
-    this.mongoose = require('mongoose');
+const MandhDbModel = function (model, collectionName, db = "default") {
+  const collectionSchema = new mongoose.Schema(model);
 
-    this.db = db || 'default';
-    const collectionSchema = new this.mongoose.Schema(model);
+  this.model = connections[db].model(
+    collectionName,
+    collectionSchema,
+    collectionName
+  );
 
-    this.model = this.mongoose[this.db].model(collectionName, collectionSchema, collectionName);
+  //Find document by id.
+  this.findById = async (id) => {
+    return this.model.findOne({ id }).exec();
+  };
 
+  //Find document by specific field.
+  this.findByField = async (field, value) => {
+    const filterData = {};
+    filterData[field] = value;
 
-    //Check is id exist on db.
-    this.isIdExist = async (id) => {
-        return this.model.exists({ id });
-    }
+    return this.model.findOne(filterData).exec();
+  };
 
-    //Check exists with custom query.
-    this.isQueryExist = async (query) => {
-        return this.model.exists(query);
-    }
+  //Update document by id.
+  this.updateById = async (id, data) => {
+    const updateData = {
+      updatedDate: new Date(),
+    };
 
-    //Create new document.
-    this.create = async (data) => {
-        data.createdDate = new Date();
+    Object.keys(data).forEach((key) => {
+      if (data[key] !== undefined && key !== "id") updateData[key] = data[key];
+    });
 
-        return this.model.create(data);
-    }
+    return this.model.updateOne(
+      { id },
+      {
+        $set: updateData,
+      }
+    );
+  };
 
-    //Find document by id.
-    this.findById = async (id) => {
-        return this.model.findOne({ id }).exec();
-    }
+  //Update documents by custom query.
+  this.updateByQuery = async (query, data) => {
+    const updateData = {
+      updatedDate: new Date(),
+    };
 
-    //Find document by specific field.
-    this.findByField = async (field, value) => {
-        const filterData = {};
-        filterData[field] = value;
+    Object.keys(data).forEach((key) => {
+      if (data[key] !== undefined && key !== "id") updateData[key] = data[key];
+    });
 
-        return this.model.findOne(filterData).exec();
-    }
+    return (
+      query &&
+      Object.keys(query).length > 0 &&
+      this.model.updateMany(query, {
+        $set: updateData,
+      })
+    );
+  };
 
-    //Find document with custom query.
-    this.findByQuery = async (query) => {
-        return this.model.findOne(query).exec();
-    }
+  //List query for pageable, searchable lists.
+  this.findListable = async ({
+    take = 10,
+    skip = 0,
+    search = {
+      fields: null,
+      value: null,
+    },
+    sort = {
+      by: null,
+      type: "desc",
+    },
+    dateFilter = {
+      field: null,
+      start: null,
+      end: null,
+    },
+  }) => {
+    const filterData = {};
+    const sortData = {};
 
-    //List documents with custom query.
-    this.list = async (query) => {
-        return this.model.find(query || {}).exec();
-    }
+    if (sort && sort.by && sort.type)
+      sortData[sort.by] = sort.type !== "desc" ? -1 : 1;
 
-    //Delete document by id.
-    this.deleteById = async (id) => {
-        return this.model.deleteOne({ id });
-    }
+    if (search && search.fields && search.value) {
+      search.fields =
+        typeof search.fields === "string" ? [search.fields] : search.fields;
 
-    //Delete documents by custom query.
-    this.deleteByQuery = async (query) => {
-        return query && this.model.deleteMany(query);
-    }
-
-    //Update document by id.
-    this.updateById = async (id, data) => {
-        const updateData = {
-            updatedDate: new Date()
+      filterData.$or = search.fields.map((field) => {
+        const searchData = {};
+        searchData[field] = {
+          $regex: new RegExp(
+            ".*" +
+              stringUtil.toTurkishSearchable(regexEscape(search.value)) +
+              ".*"
+          ),
         };
 
-        Object.keys(data).forEach((key) => {
-            if (data[key] !== undefined && key !== "id")
-                updateData[key] = data[key];
-        })
-
-        return this.model.updateOne({ id }, {
-            $set: updateData
-        })
+        return searchData;
+      });
     }
 
-    //Update documents by custom query.
-    this.updateByQuery = async (query, data) => {
-        const updateData = {
-            updatedDate: new Date()
-        };
+    if (
+      dateFilter &&
+      dateFilter.field &&
+      (dateFilter.start || dateFilter.end)
+    ) {
+      filterData.$and = [];
 
-        Object.keys(data).forEach((key) => {
-            if (data[key] !== undefined && key !== "id")
-                updateData[key] = data[key];
-        })
+      if (dateFilter.start) {
+        const dateFilterData = {};
+        dateFilterData[dateFilter.field] = { $gte: dateFilter.start };
 
-        return query && Object.keys(query).length > 0 && this.model.updateMany(query, {
-            $set: updateData
-        })
+        filterData.$and.push(dateFilterData);
+      }
+
+      if (dateFilter.end) {
+        const dateFilterData = {};
+        dateFilterData[dateFilter.field] = { $lte: dateFilter.end };
+
+        filterData.$and.push(dateFilterData);
+      }
     }
 
-    //List query for pageable, searchable lists.
-    this.findListable = async ({
-        take = 10,
-        skip = 0,
-        search = {
-            fields: null,
-            value: null
-        },
-        sort = {
-            by: null,
-            type: "desc"
-        },
-        dateFilter = {
-            field: null,
-            start: null,
-            end: null
-        },
-    }) => {
-        const filterData = {};
-        const sortData = {};
+    return this.model
+      .find(filterData)
+      .sort(sortData)
+      .limit(take)
+      .skip(skip)
+      .exec();
+  };
 
-        if (sort && sort.by && sort.type)
-            sortData[sort.by] = sort.type !== "desc" ? -1 : 1;
-
-        if (search && search.fields && search.value) {
-            search.fields = typeof search.fields === "string" ? [search.fields] : search.fields;
-
-            filterData.$or = search.fields.map(field => {
-                const searchData = {};
-                searchData[field] = { $regex: new RegExp('.*' + stringUtil.toTurkishSearchable(regexEscape(search.value)) + '.*') };
-
-                return searchData
-            })
-        }
-
-        if (dateFilter && dateFilter.field && (dateFilter.start || dateFilter.end)) {
-            filterData.$and = [];
-
-            if (dateFilter.start) {
-                const dateFilterData = {};
-                dateFilterData[dateFilter.field] = { $gte: dateFilter.start };
-
-                filterData.$and.push(dateFilterData)
-            }
-
-            if (dateFilter.end) {
-                const dateFilterData = {};
-                dateFilterData[dateFilter.field] = { $lte: dateFilter.end };
-
-                filterData.$and.push(dateFilterData)
-            }
-        }
-
-        return this.model.find(filterData)
-            .sort(sortData)
-            .limit(take)
-            .skip(skip)
-            .exec();
-    }
-
-    //Returns mongoose model.
-    this.getMongooseModel = () => { return this.model; }
-
-    //Add custom function to model.
-    this.registerCustomFunction = (fnName, fn) => {
-        this[fnName] = fn;
-    }
-}
+  //Returns mongoose model.
+  this.getMongooseModel = () => {
+    return this.model;
+  };
+};
 
 module.exports = {
-    MandhDbModel,
-    createConnection,
-    getId,
-    fieldTypes
-}
+  MandhDbModel,
+  clearConnections,
+  createConnection,
+  createModel,
+  deleteConnection,
+  getConnection,
+  getId,
+};
